@@ -1,14 +1,22 @@
 use std::collections::HashMap;
+use std::env;
+use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread::spawn;
 
 fn main() {
+    let args = env::args().collect::<Vec<String>>();
+    let mut  dir = None;
+    if args.len() == 3 && args[1] == "--directory" {
+       dir = Some(args[2].clone());
+    }
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                spawn(|| handle_connection(stream));
+                let dir = dir.clone();
+                spawn(|| handle_connection(stream, dir));
             }
             Err(e) => {
                 println!("error: {}", e);
@@ -17,7 +25,7 @@ fn main() {
     }
 }
 
-fn handle_connection(mut stream: TcpStream) {
+fn handle_connection(mut stream: TcpStream, dir: Option<String>) {
     let mut buffer = [0; 1024];
     stream.read(&mut buffer).unwrap();
     let http_request = HttpRequest::new(&mut buffer);
@@ -35,6 +43,7 @@ fn handle_connection(mut stream: TcpStream) {
             );
             stream.write_all(response.as_bytes()).unwrap();
         }
+        
         s => {
             if s.starts_with("/echo/") {
                 let content = s.strip_prefix("/echo/").unwrap();
@@ -43,6 +52,21 @@ fn handle_connection(mut stream: TcpStream) {
                     content.len(),
                     content
                 );
+                stream.write_all(response.as_bytes()).unwrap();
+            } else if s.starts_with("/files/") {
+                let filename = s.strip_prefix("/files").unwrap();
+                let filepath = match dir {
+                    Some(dir) => format!("{dir}/{filename}"),
+                    None => format!("/{filename}"),
+                };
+                let response = match read_file(filepath) {
+                    Ok(content) => format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
+                        content.len(),
+                        content
+                    ),
+                    Err(_) => "HTTP/1.1 404 Not Found\r\n\r\n".to_string(),
+                };
                 stream.write_all(response.as_bytes()).unwrap();
             } else {
                 let response = "HTTP/1.1 404 Not Found\r\n\r\n";
@@ -54,6 +78,13 @@ fn handle_connection(mut stream: TcpStream) {
             stream.write_all(response.as_bytes()).unwrap();
         }
     }
+}
+
+fn read_file(filepath: String) -> std::io::Result<String> {
+    let mut file = File::open(filepath)?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)?;
+    Ok(content)
 }
 
 #[derive(Debug)]
