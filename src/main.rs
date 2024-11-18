@@ -1,7 +1,6 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 
-
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
@@ -9,7 +8,7 @@ fn main() {
     // Uncomment this block to pass the first stage
     //
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
-    
+
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
@@ -41,22 +40,37 @@ fn handle_connection(stream: &mut std::net::TcpStream) {
     let buf_reader = BufReader::new(&mut *stream);
 
     let http_request: Vec<_> = buf_reader
-    .lines()
-    .map(|line| line.unwrap())
-    .take_while(|x| !x.is_empty())
-    .collect();
+        .lines()
+        .map(|line| line.unwrap())
+        .take_while(|x| !x.is_empty())
+        .collect();
 
     let request_line = http_request[0].split(" ").collect::<Vec<&str>>();
-
-    match request_line[1] {
+    let method = request_line[0];
+    let path = request_line[1];
+    match path {
         "/" => {
             let response = "HTTP/1.1 200 OK\r\n\r\nHello, world";
             stream.write_all(response.as_bytes()).unwrap();
+        }
+        s => {
+            if s.starts_with("/echo/") {
+                let content = s.strip_prefix("/echo/").unwrap();
+                println!("content: {}", content);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                    content.len(),
+                    content
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+            } else {
+                let response = "HTTP/1.1 404 Not Found\r\n\r\n";
+                stream.write_all(response.as_bytes()).unwrap();
+            }
         }
         _ => {
             let response = "HTTP/1.1 404 Not Found\r\n\r\n";
             stream.write_all(response.as_bytes()).unwrap();
         }
     }
-
 }
