@@ -1,19 +1,14 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::thread::spawn;
 
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
-
-    // Uncomment this block to pass the first stage
-    //
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
-
     for stream in listener.incoming() {
         match stream {
-            Ok(mut stream) => {
-                handle_connection(&mut stream);
+            Ok(stream) => {
+                spawn(|| handle_connection(stream));
             }
             Err(e) => {
                 println!("error: {}", e);
@@ -21,30 +16,14 @@ fn main() {
         }
     }
 }
-// GET /index.html HTTP/1.1\r\nHost: localhost:4221\r\nUser-Agent: curl/7.64.1\r\nAccept: */*\r\n\r\n
 
-// Request line
-// GET                          // HTTP method
-// /index.html                  // Request target
-// HTTP/1.1                     // HTTP version
-// \r\n                         // CRLF that marks the end of the request line
-
-// // Headers
-// Host: localhost:4221\r\n     // Header that specifies the server's host and port
-// User-Agent: curl/7.64.1\r\n  // Header that describes the client's user agent
-// Accept: */*\r\n              // Header that specifies which media types the client can accept
-// \r\n                         // CRLF that marks the end of the headers
-
-// // Request body (empty)
-
-fn handle_connection(stream: &mut std::net::TcpStream) {
+fn handle_connection(mut stream: TcpStream) {
     let mut buffer = [0; 1024];
     stream.read(&mut buffer).unwrap();
     let http_request = HttpRequest::new(&mut buffer);
-    println!("http_request: {:?}", &http_request);
     match http_request.head.path.as_str() {
         "/" => {
-            let response = "HTTP/1.1 200 OK\r\n\r\nHello, world";
+            let response = "HTTP/1.1 200 OK\r\n\r\n";
             stream.write_all(response.as_bytes()).unwrap();
         }
         "/user-agent" => {
@@ -59,7 +38,6 @@ fn handle_connection(stream: &mut std::net::TcpStream) {
         s => {
             if s.starts_with("/echo/") {
                 let content = s.strip_prefix("/echo/").unwrap();
-                println!("content: {}", content);
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
                     content.len(),
