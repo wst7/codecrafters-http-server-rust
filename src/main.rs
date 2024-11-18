@@ -1,4 +1,5 @@
-use std::io::{BufRead, BufReader, Write};
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 
 fn main() {
@@ -37,20 +38,22 @@ fn main() {
 // // Request body (empty)
 
 fn handle_connection(stream: &mut std::net::TcpStream) {
-    let buf_reader = BufReader::new(&mut *stream);
-
-    let http_request: Vec<_> = buf_reader
-        .lines()
-        .map(|line| line.unwrap())
-        .take_while(|x| !x.is_empty())
-        .collect();
-
-    let request_line = http_request[0].split(" ").collect::<Vec<&str>>();
-    let method = request_line[0];
-    let path = request_line[1];
-    match path {
+    let mut buffer = [0; 1024];
+    stream.read(&mut buffer).unwrap();
+    let http_request = HttpRequest::new(&mut buffer);
+    println!("http_request: {:?}", &http_request);
+    match http_request.head.path.as_str() {
         "/" => {
             let response = "HTTP/1.1 200 OK\r\n\r\nHello, world";
+            stream.write_all(response.as_bytes()).unwrap();
+        }
+        "/user-agent" => {
+            let user_agent = http_request.head.headers.get("User-Agent").unwrap();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                user_agent.len(),
+                user_agent
+            );
             stream.write_all(response.as_bytes()).unwrap();
         }
         s => {
@@ -71,6 +74,58 @@ fn handle_connection(stream: &mut std::net::TcpStream) {
         _ => {
             let response = "HTTP/1.1 404 Not Found\r\n\r\n";
             stream.write_all(response.as_bytes()).unwrap();
+        }
+    }
+}
+
+#[derive(Debug)]
+struct HttpRequest {
+    head: Head,
+}
+#[derive(Debug)]
+struct Head {
+    method: String,
+    path: String,
+    headers: HashMap<String, String>,
+}
+impl HttpRequest {
+    pub fn new(buffer: &mut [u8]) -> Self {
+        HttpRequest {
+            head: Head::new(buffer),
+        }
+    }
+}
+impl Head {
+    pub fn new(buffer: &mut [u8]) -> Self {
+        let request = String::from_utf8_lossy(&buffer[..]);
+        let mut method = String::new();
+        let mut path = String::new();
+        let mut headers = HashMap::new();
+
+        let mut is_header = true;
+        let lines: Vec<_> = request.split("\r\n").collect();
+        lines.iter().for_each(|&line| {
+            if line.is_empty() {
+                is_header = false;
+                return;
+            }
+            if line.starts_with("GET") {
+                let mut items = line.split(" ");
+                method = items.next().unwrap().to_string();
+                path = items.next().unwrap().to_string();
+                return;
+            }
+            if is_header {
+                let items: Vec<_> = line.split(": ").collect();
+                headers.insert(items[0].to_string(), items[1].to_string());
+            }
+            //
+        });
+
+        Head {
+            method,
+            path,
+            headers,
         }
     }
 }
