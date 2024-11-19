@@ -3,6 +3,7 @@ use std::env;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::prelude::v1;
 use std::thread::spawn;
 
 fn main() {
@@ -41,7 +42,9 @@ fn handle_connection(mut stream: TcpStream, dir: Option<String>) {
 
 fn handle_get_request(http_request: HttpRequest, mut stream: TcpStream, dir: Option<String>) {
     let mut response = HttpResponse::new(200);
-    match http_request.headers.get("Accept-Encoding") {
+    let encoding = http_request.headers.get("Accept-Encoding");
+
+    match parse_encoding(encoding) {
         Some(encoding) => {
             if encoding == "gzip" {
                 response.set_header("Content-Encoding", encoding);
@@ -242,4 +245,21 @@ fn get_status_text(status_code: u16) -> &'static str {
        .find(|&(code, _)| *code == status_code)
        .map(|&(_, text)| text)
        .unwrap_or("Unknown")
+}
+
+fn parse_encoding(encoding: Option<&String>) -> Option<&str> {
+    match encoding {
+        Some(encoding) => {
+            let mut value  = None;
+            let encodings: Vec<_> = encoding.split(",").map(|en| en.trim()).collect();
+            for encoding in encodings {
+                if encoding == "gzip" {
+                    value = Some("gzip");
+                    break;
+                }
+            }
+            value
+        }
+        None => None,
+    }
 }
