@@ -40,29 +40,34 @@ fn handle_connection(mut stream: TcpStream, dir: Option<String>) {
 }
 
 fn handle_get_request(http_request: HttpRequest, mut stream: TcpStream, dir: Option<String>) {
+    let mut response = HttpResponse::new(200);
+    match http_request.headers.get("Accept-Encoding") {
+        Some(encoding) => {
+            if encoding == "gzip" {
+                response.set_header("Content-Encoding", encoding);
+            }
+        }
+        None => ()
+    }; 
     match http_request.path.as_str() {
         "/" => {
-            let response = "HTTP/1.1 200 OK\r\n\r\n";
+            let response = response.to_string();
             stream.write_all(response.as_bytes()).unwrap();
         }
         "/user-agent" => {
             let user_agent = http_request.headers.get("User-Agent").unwrap();
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                user_agent.len(),
-                user_agent
-            );
+            response.set_header("Content-Type", "text/plain");
+            response.set_body(user_agent.as_bytes().to_vec());
+            let response = response.to_string();
             stream.write_all(response.as_bytes()).unwrap();
         }
 
         s => {
             if s.starts_with("/echo/") {
                 let content = s.strip_prefix("/echo/").unwrap();
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                    content.len(),
-                    content
-                );
+                response.set_header("Content-Type", "text/plain");
+                response.set_body(content.as_bytes().to_vec());
+                let response = response.to_string();
                 stream.write_all(response.as_bytes()).unwrap();
             } else if s.starts_with("/files/") {
                 let filename = s.strip_prefix("/files").unwrap();
@@ -71,12 +76,12 @@ fn handle_get_request(http_request: HttpRequest, mut stream: TcpStream, dir: Opt
                     None => format!("/{filename}"),
                 };
                 let response = match read_file(filepath) {
-                    Ok(content) => format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
-                        content.len(),
-                        content
-                    ),
-                    Err(_) => "HTTP/1.1 404 Not Found\r\n\r\n".to_string(),
+                    Ok(content) => {
+                        response.set_header("Content-Type", " application/octet-stream");
+                        response.set_body(content.as_bytes().to_vec());
+                      response.to_string() 
+                    },
+                    Err(_) => response.set_status_code(404).to_string(),
                 };
                 stream.write_all(response.as_bytes()).unwrap();
             } else {
@@ -91,6 +96,15 @@ fn handle_get_request(http_request: HttpRequest, mut stream: TcpStream, dir: Opt
     }
 }
 fn handle_post_request(http_request: HttpRequest, mut stream: TcpStream, dir: Option<String>) {
+    let mut response = HttpResponse::new(200);
+    match http_request.headers.get("Accept-Encoding") {
+        Some(encoding) => {
+            if encoding == "gzip" {
+                response.set_header("Content-Encoding", encoding);
+            }
+        }
+        None => ()
+    }; 
     match http_request.path.as_str() {
         s => {
             if s.starts_with("/files/") {
@@ -171,4 +185,61 @@ impl HttpRequest {
             body,
         }
     }
+}
+
+struct  HttpResponse {
+    status_code: u16,
+    headers: HashMap<String, String>,
+    body: Vec<u8>,
+}
+impl HttpResponse {
+    pub fn new(status_code: u16) -> Self {
+        HttpResponse {
+            status_code,
+            headers: HashMap::new(),
+            body: Vec::new(),
+        }
+    }
+    pub fn set_status_code(&mut self, status_code: u16) -> &mut Self {
+        self.status_code = status_code;
+        self
+    }
+    pub fn set_header(&mut self, key: &str, value: &str) -> &mut Self {
+        self.headers.insert(key.to_string(), value.to_string());
+        self
+    }
+    pub fn set_body(&mut self, body: Vec<u8>) -> &mut Self {
+        self.body = body;
+        self
+    }
+}
+impl ToString for HttpResponse {
+    fn to_string(&self) -> String {
+        let mut response = format!(
+            "HTTP/1.1 {} {}\r\n",
+            self.status_code,
+            get_status_text(self.status_code)
+        );
+        self.headers.iter().for_each(|(key, value)| {
+            response.push_str(&format!("{}: {}\r\n", key, value));
+        });
+        response.push_str(&format!("Content-Length: {}\r\n\r\n", self.body.len()));
+        response.push_str(&String::from_utf8_lossy(&self.body));
+        response
+    }
+}
+
+static STATUS_CODES: [(u16, &'static str); 5] = [
+    (200, "OK"),
+    (404, "Not Found"),
+    (405, "Method Not Allowed"),
+    (400, "Bad Request"),
+    (500, "Internal Server Error"),
+];
+fn get_status_text(status_code: u16) -> &'static str {
+    STATUS_CODES
+       .iter()
+       .find(|&(code, _)| *code == status_code)
+       .map(|&(_, text)| text)
+       .unwrap_or("Unknown")
 }
