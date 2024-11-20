@@ -278,8 +278,9 @@ impl HttpResponse {
 //     }
 // }
 
-static STATUS_CODES: [(u16, &'static str); 5] = [
+static STATUS_CODES: [(u16, &'static str); 6]  = [
     (200, "OK"),
+    (201, "Created"),
     (404, "Not Found"),
     (405, "Method Not Allowed"),
     (400, "Bad Request"),
