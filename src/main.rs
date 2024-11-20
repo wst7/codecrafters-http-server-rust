@@ -1,3 +1,4 @@
+use flate2::{write::GzEncoder, Compression};
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
@@ -50,19 +51,19 @@ fn handle_get_request(http_request: HttpRequest, mut stream: TcpStream, dir: Opt
                 response.set_header("Content-Encoding", encoding);
             }
         }
-        None => ()
-    }; 
+        None => (),
+    };
     match http_request.path.as_str() {
         "/" => {
-            let response = response.to_string();
-            stream.write_all(response.as_bytes()).unwrap();
+            // let response = response.to_string();
+            stream.write_all(&response.as_bytes()).unwrap();
         }
         "/user-agent" => {
             let user_agent = http_request.headers.get("User-Agent").unwrap();
             response.set_header("Content-Type", "text/plain");
             response.set_body(user_agent.as_bytes().to_vec());
-            let response = response.to_string();
-            stream.write_all(response.as_bytes()).unwrap();
+            // let response = response.to_string();
+            stream.write_all(&response.as_bytes()).unwrap();
         }
 
         s => {
@@ -70,8 +71,8 @@ fn handle_get_request(http_request: HttpRequest, mut stream: TcpStream, dir: Opt
                 let content = s.strip_prefix("/echo/").unwrap();
                 response.set_header("Content-Type", "text/plain");
                 response.set_body(content.as_bytes().to_vec());
-                let response = response.to_string();
-                stream.write_all(response.as_bytes()).unwrap();
+                // let response = response.to_string();
+                stream.write_all(&response.as_bytes()).unwrap();
             } else if s.starts_with("/files/") {
                 let filename = s.strip_prefix("/files").unwrap();
                 let filepath = match dir {
@@ -82,11 +83,11 @@ fn handle_get_request(http_request: HttpRequest, mut stream: TcpStream, dir: Opt
                     Ok(content) => {
                         response.set_header("Content-Type", " application/octet-stream");
                         response.set_body(content.as_bytes().to_vec());
-                      response.to_string() 
-                    },
-                    Err(_) => response.set_status_code(404).to_string(),
+                        response.as_bytes()
+                    }
+                    Err(_) => response.set_status_code(404).as_bytes(),
                 };
-                stream.write_all(response.as_bytes()).unwrap();
+                stream.write_all(&response).unwrap();
             } else {
                 let response = "HTTP/1.1 404 Not Found\r\n\r\n";
                 stream.write_all(response.as_bytes()).unwrap();
@@ -106,8 +107,8 @@ fn handle_post_request(http_request: HttpRequest, mut stream: TcpStream, dir: Op
                 response.set_header("Content-Encoding", encoding);
             }
         }
-        None => ()
-    }; 
+        None => (),
+    };
     match http_request.path.as_str() {
         s => {
             if s.starts_with("/files/") {
@@ -117,11 +118,11 @@ fn handle_post_request(http_request: HttpRequest, mut stream: TcpStream, dir: Op
                     None => format!("/{filename}"),
                 };
                 write_file(filepath, http_request.body).unwrap();
-                let response = format!("HTTP/1.1 201 Created\r\n\r\n");
-                stream.write_all(response.as_bytes()).unwrap();
+                let response = response.set_status_code(201);
+                stream.write_all(&response.as_bytes()).unwrap();
             } else {
-                let response = "HTTP/1.1 404 Not Found\r\n\r\n";
-                stream.write_all(response.as_bytes()).unwrap();
+                let response = response.set_status_code(404);
+                stream.write_all(&response.as_bytes()).unwrap();
             }
         }
         _ => {
@@ -190,7 +191,7 @@ impl HttpRequest {
     }
 }
 
-struct  HttpResponse {
+struct HttpResponse {
     status_code: u16,
     headers: HashMap<String, String>,
     body: Vec<u8>,
@@ -215,22 +216,67 @@ impl HttpResponse {
         self.body = body;
         self
     }
-}
-impl ToString for HttpResponse {
-    fn to_string(&self) -> String {
-        let mut response = format!(
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut buffer = vec![];
+        let mut headers = String::new();
+        headers.push_str(&format!(
             "HTTP/1.1 {} {}\r\n",
             self.status_code,
             get_status_text(self.status_code)
-        );
+        ));
         self.headers.iter().for_each(|(key, value)| {
-            response.push_str(&format!("{}: {}\r\n", key, value));
+            headers.push_str(&format!("{}: {}\r\n", key, value));
         });
-        response.push_str(&format!("Content-Length: {}\r\n\r\n", self.body.len()));
-        response.push_str(&String::from_utf8_lossy(&self.body));
-        response
+        if let Some(encoding) = self.headers.get("Content-Encoding") {
+            if encoding == "gzip" {
+                let mut gz_encoder = GzEncoder::new(Vec::new(), Compression::default());
+                gz_encoder.write_all(&self.body).unwrap();
+                let compressed = gz_encoder.finish().unwrap();
+
+            
+                headers.push_str(&format!("Content-Length: {}\r\n\r\n", compressed.len()));
+                buffer.extend_from_slice(headers.as_bytes());
+                buffer.extend_from_slice(&compressed);
+                return buffer;
+            }
+        }
+        headers.push_str(&format!("Content-Length: {}\r\n\r\n", self.body.len()));
+
+        buffer.extend_from_slice(headers.as_bytes());
+        buffer.extend_from_slice(&self.body);
+        buffer
     }
 }
+
+// impl ToString for HttpResponse {
+//     fn to_string(&self) -> String {
+//         let mut response = format!(
+//             "HTTP/1.1 {} {}\r\n",
+//             self.status_code,
+//             get_status_text(self.status_code)
+//         );
+//         self.headers.iter().for_each(|(key, value)| {
+//             response.push_str(&format!("{}: {}\r\n", key, value));
+//         });
+//         if let Some(encoding) = self.headers.get("Content-Encoding") {
+//             if encoding == "gzip" {
+//                 let mut gz_encoder = GzEncoder::new(Vec::new(), Compression::default());
+//                 gz_encoder.write_all(&self.body).unwrap();
+//                 let compressed = gz_encoder.finish().unwrap();
+
+//                 response.push_str(&format!("Content-Length: {}\r\n\r\n", compressed.len()));
+
+//                 response.push_str(&String::from_utf8_lossy(&compressed));
+//                 return response;
+//             }
+//         }
+//         response.push_str(&format!("Content-Encoding: {}\r\n", self.headers.get("Content-Encoding").unwrap()));
+
+//         response.push_str(&format!("Content-Length: {}\r\n\r\n", self.body.len()));
+//         response.push_str(&String::from_utf8_lossy(&self.body));
+//         response
+//     }
+// }
 
 static STATUS_CODES: [(u16, &'static str); 5] = [
     (200, "OK"),
@@ -241,16 +287,16 @@ static STATUS_CODES: [(u16, &'static str); 5] = [
 ];
 fn get_status_text(status_code: u16) -> &'static str {
     STATUS_CODES
-       .iter()
-       .find(|&(code, _)| *code == status_code)
-       .map(|&(_, text)| text)
-       .unwrap_or("Unknown")
+        .iter()
+        .find(|&(code, _)| *code == status_code)
+        .map(|&(_, text)| text)
+        .unwrap_or("Unknown")
 }
 
 fn parse_encoding(encoding: Option<&String>) -> Option<&str> {
     match encoding {
         Some(encoding) => {
-            let mut value  = None;
+            let mut value = None;
             let encodings: Vec<_> = encoding.split(",").map(|en| en.trim()).collect();
             for encoding in encodings {
                 if encoding == "gzip" {
